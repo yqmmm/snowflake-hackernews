@@ -15,10 +15,23 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// Command Line Arguments
 var command string
+var startId int
+
+// Globals
+var maxItem int
+
+type OutputMode int
+
+const (
+	SQLITE OutputMode = iota
+	JSON
+)
 
 func init() {
 	flag.StringVar(&command, "command", "json", "craw data into hn.db")
+	flag.IntVar(&startId, "start-id", -1, "Start crawling from this id")
 	flag.Parse()
 }
 
@@ -33,7 +46,7 @@ func Schema(db *sql.DB) {
 	fatal(err)
 }
 
-func MaxItem() int {
+func GetMaxItem() int {
 	resp, err := http.DefaultClient.Get("https://hacker-news.firebaseio.com/v0/maxitem.json")
 	fatal(err)
 
@@ -60,25 +73,20 @@ func GetItem(client *http.Client, id int) (string, error) {
 	return string(body), nil
 }
 
-func CommandCrawl() {
-	maxItem := MaxItem()
-
-	db, err := sql.Open("sqlite3", "file:hn.db?_journal_mode=OFF&_synchronous=OFF&_cache_size=100000&_locking_mode=EXCLUSIVE")
-	fatal(err)
-	defer db.Close()
-
-	Schema(db)
+func CommandCrawl(startId int, mode OutputMode) {
+	maxItem := GetMaxItem()
 
 	type Result struct {
 		Id    int
 		Value string
 	}
+
 	inputChan := make(chan int, 1000)
 	resultChan := make(chan Result)
 
 	// Input
 	go func() {
-		for i := 1; i <= maxItem; i++ {
+		for i := startId; i <= maxItem; i++ {
 			inputChan <- i
 		}
 	}()
@@ -89,7 +97,7 @@ func CommandCrawl() {
 			client := http.Client{}
 			for id := range inputChan {
 				if id%5000 == 0 {
-					log.Printf("Doing item %v", (float32)(id)/(float32)(maxItem)*100)
+					log.Printf("Doing item %v", (float32)(id-startId)/(float32)(maxItem-startId)*100)
 				}
 			start:
 				item, err := GetItem(&client, id)
@@ -105,12 +113,39 @@ func CommandCrawl() {
 		}()
 	}
 
-	for i := 0; i < maxItem; i++ {
-		result := <-resultChan
-		db.Exec("INSERT INTO items VALUES (?, ?)", result.Id, result.Value)
+	finish := make(chan interface{})
+	// Output goroutine
+	if mode == SQLITE {
+		go func() {
+			db, err := sql.Open("sqlite3", "file:hn.db?_journal_mode=OFF&_synchronous=OFF&_cache_size=100000&_locking_mode=EXCLUSIVE")
+			fatal(err)
+			defer db.Close()
+			Schema(db)
+
+			for i := startId; i <= maxItem; i++ {
+				result := <-resultChan
+				db.Exec("INSERT INTO items VALUES (?, ?)", result.Id, result.Value)
+			}
+
+			close(inputChan)
+			close(finish)
+		}()
+	} else {
+		go func() {
+			f, err := os.Create("week.json")
+			fatal(err)
+			w := bufio.NewWriterSize(f, 40960)
+			defer w.Flush()
+
+			for i := startId; i <= maxItem; i++ {
+				result := <-resultChan
+				w.WriteString(result.Value)
+				w.WriteString("\n")
+			}
+		}()
 	}
 
-	close(inputChan)
+	<-finish
 }
 
 func CommandJSON() {
@@ -124,7 +159,6 @@ func CommandJSON() {
 
 	f, err := os.Create("hn.json")
 	fatal(err)
-
 	w := bufio.NewWriterSize(f, 40960)
 	defer w.Flush()
 
@@ -141,9 +175,11 @@ func CommandJSON() {
 
 func main() {
 	if command == "crawl" {
-		CommandCrawl()
+		CommandCrawl(1, SQLITE)
 	} else if command == "json" {
 		CommandJSON()
+	} else if command == "update" {
+		CommandCrawl(startId, JSON)
 	} else {
 		fmt.Println("Unknown command.")
 	}
