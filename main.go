@@ -92,7 +92,7 @@ func CommandCrawl(startId int, mode OutputMode) {
 	}()
 
 	// Worker
-	for i := 0; i < 512; i++ {
+	for i := 0; i < 256; i++ {
 		go func() {
 			client := http.Client{}
 			for id := range inputChan {
@@ -138,10 +138,14 @@ func CommandCrawl(startId int, mode OutputMode) {
 			defer w.Flush()
 
 			for i := startId; i <= maxItem; i++ {
+				// fmt.Printf("Got %v of %v\n", i, maxItem)
 				result := <-resultChan
 				w.WriteString(result.Value)
 				w.WriteString("\n")
 			}
+
+			close(inputChan)
+			close(finish)
 		}()
 	}
 
