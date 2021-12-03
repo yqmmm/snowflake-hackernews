@@ -1,4 +1,4 @@
-module github.com/yqmmm/hn-datawarehouse
+module github.com/yqmmm/snowflake-hackernews
 
 go 1.16
 
