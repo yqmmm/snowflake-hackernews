@@ -1,15 +1,26 @@
 package main
 
 import (
+	"bufio"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 
 	"database/sql"
+
 	_ "github.com/mattn/go-sqlite3"
 )
+
+var command string
+
+func init() {
+	flag.StringVar(&command, "command", "json", "craw data into hn.db")
+	flag.Parse()
+}
 
 func fatal(err error) {
 	if err != nil {
@@ -49,13 +60,11 @@ func GetItem(client *http.Client, id int) (string, error) {
 	return string(body), nil
 }
 
-func main() {
+func CommandCrawl() {
 	maxItem := MaxItem()
 
-	db, err := sql.Open("sqlite3", "file:test.db?_journal_mode=OFF&_synchronous=OFF&_cache_size=100000&_locking_mode=EXCLUSIVE")
-	if err != nil {
-		log.Fatal(err)
-	}
+	db, err := sql.Open("sqlite3", "file:hn.db?_journal_mode=OFF&_synchronous=OFF&_cache_size=100000&_locking_mode=EXCLUSIVE")
+	fatal(err)
 	defer db.Close()
 
 	Schema(db)
@@ -102,4 +111,40 @@ func main() {
 	}
 
 	close(inputChan)
+}
+
+func CommandJSON() {
+	db, err := sql.Open("sqlite3", "file:hn.db?_journal_mode=OFF&_synchronous=OFF&_cache_size=100000&_locking_mode=EXCLUSIVE")
+	fatal(err)
+	defer db.Close()
+
+	rows, err := db.Query("SELECT value from items")
+	fatal(err)
+	defer rows.Close()
+
+	f, err := os.Create("hn.json")
+	fatal(err)
+
+	w := bufio.NewWriterSize(f, 40960)
+	defer w.Flush()
+
+	var value string
+	for rows.Next() {
+		err := rows.Scan(&value)
+		fatal(err)
+		w.WriteString(value)
+		w.WriteString("\n")
+	}
+	err = rows.Err()
+	fatal(err)
+}
+
+func main() {
+	if command == "crawl" {
+		CommandCrawl()
+	} else if command == "json" {
+		CommandJSON()
+	} else {
+		fmt.Println("Unknown command.")
+	}
 }
