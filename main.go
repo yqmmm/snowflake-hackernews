@@ -79,13 +79,13 @@ func main() {
 		go func() {
 			client := http.Client{}
 			for id := range inputChan {
-			start:
-				if id%1000 == 0 {
-					log.Printf("Doing item %v", id)
+				if id%5000 == 0 {
+					log.Printf("Doing item %v", (float32)(id)/(float32)(maxItem)*100)
 				}
+			start:
 				item, err := GetItem(&client, id)
 				if err != nil {
-					log.Printf("Retry item %v", id)
+					// log.Printf("Retry item %v", id)
 					goto start
 				}
 				resultChan <- Result{
